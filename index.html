@@ -11,6 +11,7 @@
 body {
     font-family: 'Pretendard', sans-serif;
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
@@ -28,14 +29,26 @@ body {
 
 h2 {
     font-size: 1.3rem;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.8rem;
     color: #222;
 }
 
-#dateDisplay {
-    color: #888;
+#datePicker {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 2px solid #e0e0e0;
+    font-family: 'Pretendard', sans-serif;
     font-size: 0.9rem;
+    color: #333;
     margin-bottom: 1.2rem;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#datePicker:focus {
+    border-color: #3a7bd5;
 }
 
 .tab-group {
@@ -54,7 +67,7 @@ h2 {
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.2s;
-    font-family: inherit;
+    font-family: 'Pretendard', sans-serif;
 }
 
 .tab-group button.active {
@@ -88,13 +101,21 @@ h2 {
     font-size: 0.78rem;
     color: #bbb;
 }
+
+#copyright {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #bbb;
+    text-align: center;
+}
 </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🍴 현대청운고 급식</h2>
-    <div id="dateDisplay"></div>
+    <h2>현대청운고 급식</h2>
+
+    <input type="date" id="datePicker" onchange="onDateChange()">
 
     <div class="tab-group">
         <button onclick="showMeal(0)">조식</button>
@@ -106,46 +127,47 @@ h2 {
     <div id="status">연결 중...</div>
 </div>
 
+<div id="copyright">
+    copyright &copy; 2026. 민준<br>All rights reserved.
+</div>
+
 <script>
 const API_KEY = "4b59e607f9a141b388fbf861a04158f3";
-const ATPT_OFCDC_SC_CODE = "B10";
-const SD_SCHUL_CODE = "7480037";
+const ATPT_OFCDC_SC_CODE = "H10";
+const SD_SCHUL_CODE = "7480085";
 
-// MEAL_TYPE: 1=조식, 2=중식, 3=석식
-const MEAL_TYPE_CODES = [1, 2, 3];
 let meals = [null, null, null];
-let currentIndex = 1;
 
-function getYMD() {
+function getTodayYMD() {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
-    return `${year}${month}${day}`;
+    return `${year}-${month}-${day}`;
 }
 
-function updateDate() {
-    const now = new Date();
-    const dayNames = ['일','월','화','수','목','금','토'];
-    document.getElementById("dateDisplay").innerText =
-        `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일 (${dayNames[now.getDay()]})`;
+function pickerValueToYMD(val) {
+    return val.replace(/-/g, "");
 }
 
 function parseDish(raw) {
     if (!raw) return null;
     return raw
-        .replace(/<br\/>/gi, "\n")          // 줄바꿈 태그 처리
-        .replace(/\([0-9.×*]+\)/g, "")      // 알레르기 번호 제거: (1.2.13) 등
-        .replace(/[*×]/g, "")               // 남은 특수문자 제거
+        .replace(/<br\/>/gi, "\n")
+        .replace(/\([0-9.×*]+\)/g, "")
+        .replace(/[*×]/g, "")
         .split("\n")
         .map(line => line.trim())
         .filter(line => line.length > 0)
         .join("\n");
 }
 
-async function fetchMeal() {
-    const ymd = getYMD();
-    // 하루치 전체를 한 번에 가져옴 (MLSV_YMD로 당일 전체 조회)
+async function fetchMeal(ymd) {
+    meals = [null, null, null];
+    setStatus("불러오는 중...");
+    document.getElementById("mealContent").classList.add("empty");
+    document.getElementById("mealContent").innerText = "불러오는 중...";
+
     const url = `https://open.neis.go.kr/hub/mealServiceDietInfo` +
         `?KEY=${API_KEY}&Type=json` +
         `&ATPT_OFCDC_SC_CODE=${ATPT_OFCDC_SC_CODE}` +
@@ -157,25 +179,15 @@ async function fetchMeal() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        // NEIS API 에러 응답 처리
-        if (data.RESULT) {
-            setStatus(`급식 정보 없음 (${data.RESULT.MESSAGE})`);
-            showMeal(1);
-            return;
-        }
-
-        if (!data.mealServiceDietInfo) {
-            setStatus("오늘 급식 정보가 없습니다.");
+        if (data.RESULT || !data.mealServiceDietInfo) {
+            setStatus("급식 정보가 없습니다.");
             showMeal(1);
             return;
         }
 
         const rows = data.mealServiceDietInfo[1].row;
-
-        // 조식(1), 중식(2), 석식(3) 각각 파싱
         for (const row of rows) {
-            const typeCode = parseInt(row.MMEAL_SC_CODE); // 1,2,3
-            const idx = typeCode - 1;                     // 0,1,2
+            const idx = parseInt(row.MMEAL_SC_CODE) - 1;
             if (idx >= 0 && idx <= 2) {
                 meals[idx] = parseDish(row.DDISH_NM);
             }
@@ -185,37 +197,22 @@ async function fetchMeal() {
         showMeal(1);
 
     } catch (e) {
-        // CORS 오류일 가능성이 높으면 안내 메시지 표시
         console.error(e);
-        if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-            setStatus("⚠️ CORS 오류 — 아래 안내를 확인하세요");
-            document.getElementById("mealContent").innerHTML =
-                `<span style="color:#e55;font-size:0.85rem;line-height:1.8">
-                CORS 정책으로 인해 로컬 파일에서<br>
-                직접 API 호출이 차단되었습니다.<br><br>
-                <b>해결 방법:</b><br>
-                1. VS Code + Live Server 확장으로 열기<br>
-                2. 또는 터미널에서:<br>
-                <code>npx serve .</code> 후 localhost로 접속
-                </span>`;
-        } else {
-            setStatus(`오류: ${e.message}`);
-        }
+        setStatus(`오류: ${e.message}`);
     }
 }
 
 function showMeal(index) {
-    currentIndex = index;
     const content = document.getElementById("mealContent");
     const meal = meals[index];
+    const labels = ["조식", "중식", "석식"];
 
     if (meal) {
         content.classList.remove("empty");
         content.innerText = meal;
     } else {
         content.classList.add("empty");
-        content.innerText = index === 0 ? "조식 정보 없음" :
-                            index === 1 ? "중식 정보 없음" : "석식 정보 없음";
+        content.innerText = `${labels[index]} 정보 없음`;
     }
 
     document.querySelectorAll(".tab-group button").forEach((btn, i) => {
@@ -223,12 +220,19 @@ function showMeal(index) {
     });
 }
 
+function onDateChange() {
+    const val = document.getElementById("datePicker").value;
+    if (val) fetchMeal(pickerValueToYMD(val));
+}
+
 function setStatus(msg) {
     document.getElementById("status").innerText = msg;
 }
 
-updateDate();
-fetchMeal();
+// 초기 실행: 오늘 날짜 세팅 후 중식 로드
+const today = getTodayYMD();
+document.getElementById("datePicker").value = today;
+fetchMeal(pickerValueToYMD(today));
 </script>
 
 </body>
