@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>현대청운고 급식</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Pretendard', sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: #eef2f7;
+}
+
+.container {
+    background: white;
+    padding: 2rem;
+    border-radius: 20px;
+    width: 380px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+h2 {
+    font-size: 1.3rem;
+    margin-bottom: 0.8rem;
+    color: #222;
+}
+
+#datePicker {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 2px solid #e0e0e0;
+    font-family: 'Pretendard', sans-serif;
+    font-size: 0.9rem;
+    color: #333;
+    margin-bottom: 1.2rem;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#datePicker:focus {
+    border-color: #3a7bd5;
+}
+
+.tab-group {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 1.2rem;
+}
+
+.tab-group button {
+    padding: 8px 20px;
+    border-radius: 20px;
+    border: 2px solid #e0e0e0;
+    background: white;
+    color: #555;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Pretendard', sans-serif;
+}
+
+.tab-group button.active {
+    background: #3a7bd5;
+    border-color: #3a7bd5;
+    color: white;
+    font-weight: bold;
+}
+
+#mealContent {
+    min-height: 180px;
+    padding: 1rem;
+    background: #f8f9fb;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    line-height: 2;
+    color: #333;
+    text-align: left;
+}
+
+#mealContent.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #aaa;
+    font-size: 0.9rem;
+}
+
+#status {
+    margin-top: 0.8rem;
+    font-size: 0.78rem;
+    color: #bbb;
+}
+
+#copyright {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #bbb;
+    text-align: center;
+    line-height: 1.5;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <h2 id="title">현대청운고 급식</h2>
+
+    <input type="date" id="datePicker" onchange="onDateChange()">
+
+    <div class="tab-group">
+        <button onclick="showMeal(0)">조식</button>
+        <button class="active" onclick="showMeal(1)">중식</button>
+        <button onclick="showMeal(2)">석식</button>
+    </div>
+
+    <div id="mealContent" class="empty">불러오는 중...</div>
+    <div id="status">연결 중...</div>
+</div>
+
+<div id="copyright">
+    copyright &copy; 2026. 민준<br>All rights reserved.<br>
+    v 1.1
+</div>
+
+<script>
+const API_KEY = "4b59e607f9a141b388fbf861a04158f3";
+const ATPT_OFCDC_SC_CODE = "H10";
+const SD_SCHUL_CODE = "7480085";
+
+let meals = [null, null, null];
+
+// 이스터 에그 체크 함수
+function checkEasterEgg(ymd) {
+    const title = document.getElementById("title");
+    // ymd 형식은 'YYYYMMDD'
+    const monthDay = ymd.substring(4);
+    
+    // 9월 9일
+    if (monthDay === "0909") {
+        title.innerText = "시은쌤 생일 축하해요!! 🎉";
+        title.style.color = "#FF66FA"; 
+    } 
+    // 12월 5일
+    else if (monthDay === "1205") {
+        title.innerText = "헤헤.. 오늘은 내 생일! 🎉";
+        title.style.color = "#FF66FA"; 
+    }
+    // 평소
+    else {
+        title.innerText = "현대청운고 급식";
+        title.style.color = "#222";
+    }
+}
+
+function getTodayYMD() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function pickerValueToYMD(val) {
+    return val.replace(/-/g, "");
+}
+
+function parseDish(raw) {
+    if (!raw) return null;
+    return raw
+        .replace(/<br\/>/gi, "\n")
+        .replace(/\([0-9.×*]+\)/g, "")
+        .replace(/[*×]/g, "")
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join("\n");
+}
+
+async function fetchMeal(ymd) {
+    checkEasterEgg(ymd); // 날짜 변경 시마다 체크
+    
+    meals = [null, null, null];
+    setStatus("불러오는 중...");
+    document.getElementById("mealContent").classList.add("empty");
+    document.getElementById("mealContent").innerText = "불러오는 중...";
+
+    const url = `https://open.neis.go.kr/hub/mealServiceDietInfo` +
+        `?KEY=${API_KEY}&Type=json` +
+        `&ATPT_OFCDC_SC_CODE=${ATPT_OFCDC_SC_CODE}` +
+        `&SD_SCHUL_CODE=${SD_SCHUL_CODE}` +
+        `&MLSV_YMD=${ymd}`;
+
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        if (data.RESULT || !data.mealServiceDietInfo) {
+            setStatus("급식 정보가 없습니다.");
+            showMeal(1);
+            return;
+        }
+
+        const rows = data.mealServiceDietInfo[1].row;
+        for (const row of rows) {
+            const idx = parseInt(row.MMEAL_SC_CODE) - 1;
+            if (idx >= 0 && idx <= 2) {
+                meals[idx] = parseDish(row.DDISH_NM);
+            }
+        }
+
+        setStatus("불러오기 완료 ✓");
+        showMeal(1);
+
+    } catch (e) {
+        console.error(e);
+        setStatus(`오류: ${e.message}`);
+    }
+}
+
+function showMeal(index) {
+    const content = document.getElementById("mealContent");
+    const meal = meals[index];
+    const labels = ["조식", "중식", "석식"];
+
+    if (meal) {
+        content.classList.remove("empty");
+        content.innerText = meal;
+    } else {
+        content.classList.add("empty");
+        content.innerText = `${labels[index]} 정보 없음`;
+    }
+
+    document.querySelectorAll(".tab-group button").forEach((btn, i) => {
+        btn.classList.toggle("active", i === index);
+    });
+}
+
+function onDateChange() {
+    const val = document.getElementById("datePicker").value;
+    if (val) fetchMeal(pickerValueToYMD(val));
+}
+
+function setStatus(msg) {
+    document.getElementById("status").innerText = msg;
+}
+
+// 초기 실행
+const today = getTodayYMD();
+document.getElementById("datePicker").value = today;
+fetchMeal(pickerValueToYMD(today));
+</script>
+
+</body>
+</html>
